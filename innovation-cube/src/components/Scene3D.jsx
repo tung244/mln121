@@ -1,11 +1,16 @@
-import { useRef, useMemo, useState } from 'react'
+import { useRef, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Float } from '@react-three/drei'
+import { OrbitControls, Environment, ContactShadows } from '@react-three/drei'
 import * as THREE from 'three'
 
 // ── Math helpers ────────────────────────────────────────────────────
 const lerp = (a, b, t) => a + (b - a) * t
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+
+const colorLerp = (c1, c2, t) => {
+    const c = new THREE.Color(c1).lerp(new THREE.Color(c2), t)
+    return '#' + c.getHexString()
+}
 
 // Smooth opacity blend given era range [start, peak, end]
 function eraOpacity(era, start, peak, end) {
@@ -14,733 +19,382 @@ function eraOpacity(era, start, peak, end) {
     return clamp((end - era) / (end - peak), 0, 1)
 }
 
+// ── Random Utils ────────────────────────────────────────────────────
+const randomRange = (min, max) => Math.random() * (max - min) + min
+// Stable seed for useMemo so positions don't jump on hot reload (using Math.random is fine inside useMemo with empty deps)
+
 // ── Shared materials helpers ────────────────────────────────────────
 const mat = (color, opts = {}) => (
     <meshStandardMaterial color={color} roughness={0.7} metalness={0.1} {...opts} />
 )
-const emissiveMat = (color, emissive, intensity = 1) => (
-    <meshStandardMaterial color={color} emissive={emissive} emissiveIntensity={intensity} roughness={0.4} />
-)
-const glassMat = (color) => (
-    <meshPhysicalMaterial
-        color={color} metalness={0.8} roughness={0.05}
-        transmission={0.35} transparent opacity={0.85}
-        emissive={color} emissiveIntensity={0.15}
-    />
-)
 
-// ── Starfield ────────────────────────────────────────────────────────
-function Stars() {
-    const pos = useMemo(() => {
-        const a = new Float32Array(700 * 3)
-        for (let i = 0; i < 700; i++) {
-            a[i * 3] = (Math.random() - .5) * 100
-            a[i * 3 + 1] = (Math.random() - .5) * 80
-            a[i * 3 + 2] = (Math.random() - .5) * 100
-        }
-        return a
-    }, [])
-    return (
-        <points>
-            <bufferGeometry>
-                <bufferAttribute attach="attributes-position" args={[pos, 3]} />
-            </bufferGeometry>
-            <pointsMaterial size={0.07} color="#88ccff" transparent opacity={0.6} />
-        </points>
-    )
+// ── Generic Shapes ──────────────────────────────────────────────────
+function Box({ pos, size, color, ...props }) {
+    return <mesh position={pos} castShadow receiveShadow {...props}><boxGeometry args={size} /><meshStandardMaterial color={color} roughness={0.8} /></mesh>
 }
 
-// ── Ground Road ──────────────────────────────────────────────────────
+// ── Ground & Infrastructure ──────────────────────────────────────────
 function Road({ era }) {
-    const roadColor = era < 1 ? '#2a2a1a' : era < 2 ? '#333333' : '#222222'
+    const roadBase = era < 1 ? '#a1887f' : era < 2 ? '#9e9e9e' : era < 3 ? '#bdbdbd' : '#eeeeee'
+    const laneColor = era < 1 ? '#8d6e63' : era < 2 ? '#616161' : era < 3 ? '#757575' : '#e0e0e0'
+    const sidewalk = era < 1 ? '#795548' : era < 3 ? '#9e9e9e' : '#fff'
+
     const hasMarkings = era > 0.8
     return (
         <group>
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.5, 0]} receiveShadow>
-                <planeGeometry args={[28, 28]} />
-                {mat(roadColor, { roughness: 0.95 })}
+                <planeGeometry args={[60, 40]} />
+                <meshStandardMaterial color={roadBase} roughness={0.8} />
             </mesh>
             {/* Road lane */}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.49, 0]}>
-                <planeGeometry args={[3.5, 28]} />
-                {mat(era < 1 ? '#2a1a00' : '#1a1a1a', { roughness: 0.9 })}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.49, 0]} receiveShadow>
+                <planeGeometry args={[5, 40]} />
+                <meshStandardMaterial color={laneColor} roughness={0.7} />
             </mesh>
             {/* Road markings */}
-            {hasMarkings && [-4, -2, 0, 2, 4].map((z, i) => (
-                <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.48, z * 2]}>
-                    <planeGeometry args={[0.1, 1.2]} />
-                    <meshStandardMaterial color="#ffff66" transparent opacity={clamp((era - 0.8) * 3, 0, 1)} />
+            {hasMarkings && Array.from({ length: 15 }).map((_, i) => (
+                <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.48, -14 + i * 2]} receiveShadow>
+                    <planeGeometry args={[0.15, 1.2]} />
+                    <meshStandardMaterial color="#ffffff" transparent opacity={clamp((era - 0.8) * 3, 0, 1)} />
                 </mesh>
             ))}
             {/* Sidewalk */}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-3.2, -1.48, 0]}>
-                <planeGeometry args={[1.5, 28]} />
-                {mat('#3a3a38')}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-4, -1.48, 0]} receiveShadow>
+                <planeGeometry args={[3, 40]} />
+                <meshStandardMaterial color={sidewalk} roughness={0.9} />
             </mesh>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[3.2, -1.48, 0]}>
-                <planeGeometry args={[1.5, 28]} />
-                {mat('#3a3a38')}
-            </mesh>
-        </group>
-    )
-}
-
-// ── Sky gradient via background ──────────────────────────────────────
-function DynamicBackground({ era }) {
-    const skyColor = useMemo(() => {
-        if (era < 0.5) return '#000810'
-        if (era < 1.5) return '#020c16'
-        if (era < 2.5) return '#030e1a'
-        if (era < 3.5) return '#04101e'
-        return '#051220'
-    }, [Math.floor(era * 2)])
-    return <color attach="background" args={[skyColor]} />
-}
-
-// ── Trees ───────────────────────────────────────────────────────────
-function Tree({ pos, size = 1, opacity = 1 }) {
-    return (
-        <group position={pos}>
-            <mesh position={[0, -0.4 * size, 0]} castShadow>
-                <cylinderGeometry args={[0.06 * size, 0.1 * size, 0.8 * size, 6]} />
-                <meshStandardMaterial color="#5c3a1e" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0, 0.2 * size, 0]} castShadow>
-                <coneGeometry args={[0.4 * size, 0.8 * size, 7]} />
-                <meshStandardMaterial color="#2d5a27" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0, 0.6 * size, 0]} castShadow>
-                <coneGeometry args={[0.28 * size, 0.6 * size, 7]} />
-                <meshStandardMaterial color="#3a7a30" transparent opacity={opacity} />
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[4, -1.48, 0]} receiveShadow>
+                <planeGeometry args={[3, 40]} />
+                <meshStandardMaterial color={sidewalk} roughness={0.9} />
             </mesh>
         </group>
     )
 }
 
-// ── Street lamp ─────────────────────────────────────────────────────
-function StreetLamp({ pos, era, opacity = 1 }) {
-    const on = era > 1
-    return (
-        <group position={pos}>
-            <mesh position={[0, 0, 0]} castShadow>
-                <cylinderGeometry args={[0.04, 0.06, 2.4, 6]} />
-                <meshStandardMaterial color="#888888" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0.3, 1.1, 0]}>
-                <cylinderGeometry args={[0.03, 0.03, 0.6, 6]} />
-                <meshStandardMaterial color="#777" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0.55, 1.1, 0]}>
-                <sphereGeometry args={[0.1, 8, 8]} />
-                <meshStandardMaterial
-                    color={on ? '#ffffcc' : '#555'}
-                    emissive={on ? '#ffffaa' : '#000'}
-                    emissiveIntensity={on ? 2 : 0}
-                    transparent opacity={opacity} />
-            </mesh>
-            {on && <pointLight position={[0.55, 1.1, 0]} intensity={0.4 * opacity} color="#ffffaa" distance={4} />}
-        </group>
-    )
-}
-
-// ── Simple person figure ─────────────────────────────────────────────
-function Person({ pos, color = '#cc8844', scale = 1, opacity = 1 }) {
-    return (
-        <group position={pos} scale={scale}>
-            <mesh position={[0, 0.05, 0]} castShadow>
-                <capsuleGeometry args={[0.08, 0.25, 4, 8]} />
-                <meshStandardMaterial color={color} transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0, 0.4, 0]} castShadow>
-                <sphereGeometry args={[0.1, 8, 8]} />
-                <meshStandardMaterial color="#f5c2a0" transparent opacity={opacity} />
-            </mesh>
-        </group>
-    )
-}
-
-// ── Bicycle ──────────────────────────────────────────────────────────
-function Bicycle({ pos, opacity = 1 }) {
-    return (
-        <group position={pos}>
-            <mesh position={[-0.25, -0.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.18, 0.025, 6, 16]} />
-                <meshStandardMaterial color="#444" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0.25, -0.9, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.18, 0.025, 6, 16]} />
-                <meshStandardMaterial color="#444" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0, -0.82, 0]} rotation={[0, 0, Math.PI / 8]}>
-                <boxGeometry args={[0.56, 0.04, 0.04]} />
-                <meshStandardMaterial color="#555" transparent opacity={opacity} />
-            </mesh>
-            {/* Rider */}
-            <Person pos={[0, -0.5, 0]} color="#884422" scale={0.7} opacity={opacity} />
-        </group>
-    )
-}
-
-// ── Motorbike ────────────────────────────────────────────────────────
-function Motorbike({ pos, color = '#cc3300', opacity = 1 }) {
-    return (
-        <group position={pos}>
-            <mesh position={[-0.3, -0.85, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.2, 0.04, 6, 16]} />
-                <meshStandardMaterial color="#222" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0.3, -0.85, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.2, 0.04, 6, 16]} />
-                <meshStandardMaterial color="#222" transparent opacity={opacity} />
-            </mesh>
-            <mesh position={[0, -0.72, 0]}>
-                <boxGeometry args={[0.7, 0.15, 0.28]} />
-                <meshStandardMaterial color={color} transparent opacity={opacity} />
-            </mesh>
-            <Person pos={[0, -0.35, 0]} color="#994400" scale={0.75} opacity={opacity} />
-        </group>
-    )
-}
-
-// ── Car ────────────────────────────────────────────────────────────
-function Car({ pos, color = '#2244aa', opacity = 1, modern = false }) {
-    return (
-        <group position={pos}>
-            {/* Wheels */}
-            {[[-0.5, -1], [0.5, -1], [-0.5, 0.7], [0.5, 0.7]].map(([x, z], i) => (
-                <mesh key={i} position={[x, -0.75, z]} rotation={[Math.PI / 2, 0, 0]}>
-                    <torusGeometry args={[0.22, 0.07, 6, 16]} />
-                    <meshStandardMaterial color="#111" transparent opacity={opacity} />
-                </mesh>
-            ))}
-            {/* Body */}
-            <mesh position={[0, -0.6, 0]}>
-                <boxGeometry args={[1.1, 0.32, 1.8]} />
-                <meshStandardMaterial color={color} metalness={modern ? 0.7 : 0.3} roughness={modern ? 0.2 : 0.7} transparent opacity={opacity} />
-            </mesh>
-            {/* Cabin */}
-            <mesh position={[0, -0.25, -0.1]}>
-                <boxGeometry args={[0.95, 0.3, 1.1]} />
-                <meshStandardMaterial color={modern ? '#88ccff' : '#aaaaaa'} metalness={0.5} roughness={0.1} transparent opacity={opacity * 0.7} />
-            </mesh>
-            {modern && (
-                <mesh position={[0.55, -0.6, 0]}>
-                    <boxGeometry args={[0.04, 0.06, 0.4]} />
-                    <meshStandardMaterial color="#00ff88" emissive="#00ff88" emissiveIntensity={2} transparent opacity={opacity} />
-                </mesh>
-            )}
-        </group>
-    )
-}
-
-// ── Market Stall (1986 mậu dịch) ────────────────────────────────────
-function MarketStall({ pos, opacity = 1 }) {
-    return (
-        <group position={pos}>
-            {/* Counter */}
-            <mesh position={[0, -0.6, 0]}>
-                <boxGeometry args={[1.5, 0.6, 0.6]} />
-                {mat('#6a5020', { transparent: true, opacity })}
-            </mesh>
-            {/* Awning */}
-            <mesh position={[0, -0.1, 0.15]}>
-                <boxGeometry args={[1.7, 0.06, 0.9]} />
-                {mat('#882222', { transparent: true, opacity })}
-            </mesh>
-            {/* Post */}
-            {[-0.7, 0.7].map((x, i) => (
-                <mesh key={i} position={[x, -0.3, -0.25]}>
-                    <cylinderGeometry args={[0.03, 0.03, 1.2, 6]} />
-                    {mat('#555', { transparent: true, opacity })}
-                </mesh>
-            ))}
-            {/* Goods boxes */}
-            {[-0.4, 0, 0.4].map((x, i) => (
-                <mesh key={i} position={[x, -0.22, 0]}>
-                    <boxGeometry args={[0.25, 0.18, 0.25]} />
-                    {mat(['#8a6030', '#7a4820', '#5a3010'][i], { transparent: true, opacity })}
-                </mesh>
-            ))}
-            <Person pos={[0.1, 0.05, 0.5]} color="#885533" scale={0.85} opacity={opacity} />
-        </group>
-    )
-}
-
-// ── Modern shop / Coffee ─────────────────────────────────────────────
-function CafeShop({ pos, opacity = 1 }) {
-    return (
-        <group position={pos}>
-            <mesh position={[0, -0.35, 0]}>
-                <boxGeometry args={[1.8, 1.5, 1.2]} />
-                {mat('#eeeeee', { transparent: true, opacity })}
-            </mesh>
-            {/* Glass front */}
-            <mesh position={[0, -0.35, 0.61]}>
-                <boxGeometry args={[1.6, 1.3, 0.04]} />
-                <meshPhysicalMaterial color="#88deff" transmission={0.6} transparent opacity={opacity * 0.7} metalness={0.4} />
-            </mesh>
-            {/* Sign */}
-            <mesh position={[0, 0.5, 0.5]}>
-                <boxGeometry args={[1.2, 0.28, 0.06]} />
-                {mat('#ff4488', { transparent: true, opacity })}
-            </mesh>
-            <Person pos={[-0.3, -0.35, 0.8]} color="#774433" scale={0.85} opacity={opacity} />
-            <Person pos={[0.4, -0.35, 0.8]} color="#446688" scale={0.85} opacity={opacity} />
-        </group>
-    )
-}
-
-// ── Solar panel ──────────────────────────────────────────────────────
-function SolarPanel({ pos, opacity = 1 }) {
-    return (
-        <group position={pos} rotation={[-0.3, 0, 0]}>
-            {[[-0.35, 0], [0.35, 0]].map(([x, z], i) => (
-                <mesh key={i} position={[x, 0, z]}>
-                    <boxGeometry args={[0.6, 0.04, 0.9]} />
-                    <meshStandardMaterial color="#1a2a6c" metalness={0.8} roughness={0.1} transparent opacity={opacity} />
-                </mesh>
-            ))}
-            <mesh position={[0, -0.1, 0]} rotation={[0.3, 0, 0]}>
-                <boxGeometry args={[1.5, 0.04, 0.1]} />
-                {mat('#888', { transparent: true, opacity })}
-            </mesh>
-        </group>
-    )
-}
-
-// ── EV Charging station ──────────────────────────────────────────────
-function EVCharger({ pos, opacity = 1 }) {
-    return (
-        <group position={pos}>
-            <mesh position={[0, -0.25, 0]}>
-                <boxGeometry args={[0.3, 1.5, 0.2]} />
-                {mat('#eeeeee', { transparent: true, opacity })}
-            </mesh>
-            <mesh position={[0, 0.4, 0.11]}>
-                <boxGeometry args={[0.22, 0.4, 0.04]} />
-                <meshStandardMaterial color="#00ff88" emissive="#00cc66" emissiveIntensity={1.5} transparent opacity={opacity} />
-            </mesh>
-            {/* Cable */}
-            <mesh position={[0.2, -0.1, 0]} rotation={[0, 0, Math.PI / 4]}>
-                <cylinderGeometry args={[0.015, 0.015, 0.6, 6]} />
-                {mat('#333', { transparent: true, opacity })}
-            </mesh>
-        </group>
-    )
-}
-
-// ── Metro elevated track ─────────────────────────────────────────────
-function MetroTrack({ opacity = 1 }) {
+function PowerPoles({ opacity }) {
+    const poles = useMemo(() => Array.from({ length: 8 }), [])
     return (
         <group>
-            {/* Columns */}
-            {[-4, -1, 2, 5].map((x, i) => (
-                <mesh key={i} position={[x, 0, -3]}>
-                    <boxGeometry args={[0.2, 3, 0.2]} />
-                    {mat('#aaaaaa', { transparent: true, opacity })}
-                </mesh>
-            ))}
-            {/* Beam */}
-            <mesh position={[0.5, 1.4, -3]}>
-                <boxGeometry args={[10, 0.18, 0.6]} />
-                {mat('#bbbbbb', { transparent: true, opacity })}
-            </mesh>
-            {/* Rails */}
-            {[-0.15, 0.15].map((z, i) => (
-                <mesh key={i} position={[0.5, 1.52, -3 + z]}>
-                    <boxGeometry args={[10, 0.04, 0.06]} />
-                    <meshStandardMaterial color="#888" metalness={0.9} roughness={0.2} transparent opacity={opacity} />
-                </mesh>
-            ))}
-            {/* Train car */}
-            <MetroTrain opacity={opacity} />
+            {poles.map((_, i) => {
+                const z = -15 + i * 4.5
+                return (
+                    <group key={i} position={[-2.8, -1.5, z]}>
+                        <mesh castShadow><cylinderGeometry args={[0.08, 0.1, 4.5, 8]} /><meshStandardMaterial color="#795548" transparent opacity={opacity} /></mesh>
+                        <mesh position={[0, 2, 0]}><boxGeometry args={[0.8, 0.1, 0.1]} /><meshStandardMaterial color="#555" transparent opacity={opacity} /></mesh>
+                        <mesh position={[0, 1.5, 0]} rotation={[0, Math.PI / 2, 0]}><cylinderGeometry args={[0.02, 0.02, 4.5, 4]} /><meshStandardMaterial color="#222" transparent opacity={opacity * 0.5} /></mesh>
+                        <mesh position={[0.3, 2, 0]} rotation={[0, Math.PI / 2, 0]}><cylinderGeometry args={[0.01, 0.01, 4.5, 4]} /><meshStandardMaterial color="#222" transparent opacity={opacity * 0.5} /></mesh>
+                        <mesh position={[-0.3, 2, 0]} rotation={[0, Math.PI / 2, 0]}><cylinderGeometry args={[0.01, 0.01, 4.5, 4]} /><meshStandardMaterial color="#222" transparent opacity={opacity * 0.5} /></mesh>
+                    </group>
+                )
+            })}
         </group>
     )
 }
 
-function MetroTrain({ opacity }) {
-    const ref = useRef()
-    useFrame((_, dt) => {
-        if (!ref.current) return
-        ref.current.position.x += dt * 1.5
-        if (ref.current.position.x > 7) ref.current.position.x = -6
-    })
-    return (
-        <group ref={ref} position={[-6, 1.58, -3]}>
-            {/* Body */}
-            <mesh>
-                <boxGeometry args={[2.8, 0.55, 0.48]} />
-                <meshStandardMaterial color="#2255aa" metalness={0.7} roughness={0.2} transparent opacity={opacity} />
-            </mesh>
-            {/* Windows strip */}
-            <mesh position={[0, 0.1, 0.25]}>
-                <boxGeometry args={[2.5, 0.22, 0.04]} />
-                <meshStandardMaterial color="#cceeff" metalness={0.5} roughness={0.1} transparent opacity={opacity * 0.8} />
-            </mesh>
-            {/* Front light */}
-            <mesh position={[1.41, 0, 0]}>
-                <boxGeometry args={[0.04, 0.12, 0.24]} />
-                <meshStandardMaterial color="#ffffaa" emissive="#ffff88" emissiveIntensity={3} transparent opacity={opacity} />
-            </mesh>
-        </group>
-    )
-}
+// ── Trees & Nature ──────────────────────────────────────────────────
+function TreeForest({ type = 'green', count = 20, zRange = [-10, 10], xRange = [[-12, -6], [6, 12]], opacity = 1 }) {
+    const trees = useMemo(() => {
+        return Array.from({ length: count }).map(() => {
+            const isLeft = Math.random() > 0.5;
+            const x = isLeft ? randomRange(xRange[0][0], xRange[0][1]) : randomRange(xRange[1][0], xRange[1][1]);
+            const z = randomRange(zRange[0], zRange[1]);
+            const size = randomRange(0.8, 1.5);
+            return { x, z, size }
+        })
+    }, [count, zRange, xRange])
 
-// ── WiFi / 4G Tower ──────────────────────────────────────────────────
-function TowerCell({ pos, opacity = 1 }) {
+    const cTop = type === 'green' ? '#4caf50' : type === 'autumn' ? '#ff9800' : '#81c784'
+    const cMid = type === 'green' ? '#388e3c' : type === 'autumn' ? '#f57c00' : '#4caf50'
+
     return (
-        <group position={pos}>
-            <mesh position={[0, 0, 0]} castShadow>
-                <cylinderGeometry args={[0.04, 0.06, 3, 6]} />
-                {mat('#888', { transparent: true, opacity })}
-            </mesh>
-            {[0.8, 1.4, 2.0].map((y, i) => (
-                <group key={i} position={[0, y, 0]}>
-                    {[-0.3, 0, 0.3].map((x, j) => (
-                        <mesh key={j} position={[x, 0, 0]}>
-                            <boxGeometry args={[0.06, 0.25, 0.06]} />
-                            {mat('#aaa', { transparent: true, opacity })}
-                        </mesh>
-                    ))}
+        <group>
+            {trees.map((t, i) => (
+                <group key={i} position={[t.x, -1.5, t.z]}>
+                    <mesh position={[0, 0.4 * t.size, 0]} castShadow><cylinderGeometry args={[0.06 * t.size, 0.1 * t.size, 0.8 * t.size, 6]} /><meshStandardMaterial color="#795548" transparent opacity={opacity} /></mesh>
+                    <mesh position={[0, 1.0 * t.size, 0]} castShadow><coneGeometry args={[0.4 * t.size, 0.8 * t.size, 7]} /><meshStandardMaterial color={cTop} transparent opacity={opacity} /></mesh>
+                    <mesh position={[0, 1.4 * t.size, 0]} castShadow><coneGeometry args={[0.28 * t.size, 0.6 * t.size, 7]} /><meshStandardMaterial color={cMid} transparent opacity={opacity} /></mesh>
                 </group>
             ))}
-            <mesh position={[0, 1.5, 0]}>
-                <sphereGeometry args={[0.06, 8, 8]} />
-                <meshStandardMaterial color="#ff4444" emissive="#ff0000" emissiveIntensity={2} transparent opacity={opacity} />
-            </mesh>
         </group>
     )
 }
 
-// ── Smoke particles ──────────────────────────────────────────────────
-function SmokePuff({ opacity }) {
-    const ref = useRef()
-    const count = 60
-    const pos = useMemo(() => {
-        const a = new Float32Array(count * 3)
-        for (let i = 0; i < count; i++) {
-            a[i * 3] = (Math.random() - .5) * 5; a[i * 3 + 1] = Math.random() * 3 + 1.5; a[i * 3 + 2] = (Math.random() - .5) * 4
-        }
-        return a
-    }, [])
+// ── People ──────────────────────────────────────────────────────────
+function Crowd({ count = 15, bounds = [-3.5, 3.5, -10, 10], opacity = 1 }) {
+    const people = useMemo(() => {
+        const colors = ['#f44336', '#e91e63', '#9c27b0', '#3f51b5', '#2196f3', '#00bcd4', '#009688', '#4caf50', '#8bc34a', '#ffeb3b', '#ff9800', '#ff5722', '#795548'];
+        return Array.from({ length: count }).map(() => ({
+            x: Math.random() > 0.5 ? randomRange(bounds[0] - 1.5, bounds[0] + 0.5) : randomRange(bounds[1] - 0.5, bounds[1] + 1.5),
+            z: randomRange(bounds[2], bounds[3]),
+            color: colors[Math.floor(Math.random() * colors.length)],
+            scale: randomRange(0.85, 1.15),
+            speed: randomRange(0.5, 1.5) * (Math.random() > 0.5 ? 1 : -1)
+        }))
+    }, [count, bounds])
+
+    const groupRef = useRef()
     useFrame((_, dt) => {
-        if (!ref.current) return
-        const p = ref.current.geometry.attributes.position
-        for (let i = 0; i < count; i++) {
-            p.array[i * 3 + 1] += dt * 0.35
-            if (p.array[i * 3 + 1] > 5.5) p.array[i * 3 + 1] = 1.5
-        }
-        p.needsUpdate = true
-        ref.current.material.opacity = opacity * 0.6
+        if (!groupRef.current) return;
+        groupRef.current.children.forEach((child, i) => {
+            child.position.z += people[i].speed * dt;
+            if (child.position.z > bounds[3]) child.position.z = bounds[2]
+            if (child.position.z < bounds[2]) child.position.z = bounds[3]
+        })
     })
+
     return (
-        <points ref={ref}>
-            <bufferGeometry>
-                <bufferAttribute attach="attributes-position" args={[pos, 3]} />
-            </bufferGeometry>
-            <pointsMaterial size={0.18} color="#222222" transparent opacity={opacity * 0.6} />
-        </points>
+        <group ref={groupRef}>
+            {people.map((p, i) => (
+                <group key={i} position={[p.x, -1.5, p.z]} scale={p.scale}>
+                    <mesh position={[0, 0.25, 0]} castShadow><capsuleGeometry args={[0.1, 0.35, 4, 8]} /><meshStandardMaterial color={p.color} transparent opacity={opacity} /></mesh>
+                    <mesh position={[0, 0.65, 0]} castShadow><sphereGeometry args={[0.12, 8, 8]} /><meshStandardMaterial color="#ffccbc" transparent opacity={opacity} /></mesh>
+                </group>
+            ))}
+        </group>
+    )
+}
+
+// ── Traffic ─────────────────────────────────────────────────────────
+function Traffic({ count = 8, type = 'mixed', speedMul = 1, opacity = 1 }) {
+    const vehicles = useMemo(() => {
+        const colors = ['#d32f2f', '#1976d2', '#388e3c', '#fbc02d', '#e0e0e0', '#424242', '#00bcd4']
+        return Array.from({ length: count }).map(() => {
+            const lane = Math.random() > 0.5 ? 1 : -1;
+            const x = lane * randomRange(0.6, 1.8);
+            const z = randomRange(-15, 15);
+            const isCar = type === 'car' ? true : type === 'bike' ? false : Math.random() > 0.5;
+            return {
+                x, z, lane, isCar,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                speed: (isCar ? randomRange(3, 5) : randomRange(2, 3.5)) * lane * speedMul
+            }
+        })
+    }, [count, type, speedMul])
+
+    const ref = useRef()
+    useFrame((_, dt) => {
+        if (!ref.current) return;
+        ref.current.children.forEach((child, i) => {
+            child.position.z += vehicles[i].speed * dt;
+            if (vehicles[i].lane > 0 && child.position.z > 15) child.position.z = -15;
+            if (vehicles[i].lane < 0 && child.position.z < -15) child.position.z = 15;
+        })
+    })
+
+    return (
+        <group ref={ref}>
+            {vehicles.map((v, i) => (
+                <group key={i} position={[v.x, -1.5, v.z]} rotation={[0, Math.PI / 2 * v.lane, 0]}>
+                    <mesh position={[0, 0.25, 0]} castShadow>
+                        <boxGeometry args={v.isCar ? [1.8, 0.5, 0.9] : [0.8, 0.4, 0.3]} />
+                        <meshStandardMaterial color={v.color} metalness={v.isCar ? 0.8 : 0.2} roughness={0.2} transparent opacity={opacity} />
+                    </mesh>
+                    {v.isCar && (
+                        <mesh position={[0, 0.6, -0.05]} castShadow>
+                            <boxGeometry args={[1.0, 0.35, 0.8]} />
+                            <meshPhysicalMaterial color="#cce8ff" transmission={0.8} transparent opacity={opacity} />
+                        </mesh>
+                    )}
+                    {!v.isCar && <mesh position={[0.1, 0.6, 0]}><capsuleGeometry args={[0.08, 0.2]} /><meshStandardMaterial color="#333" transparent opacity={opacity} /></mesh>}
+                </group>
+            ))}
+        </group>
+    )
+}
+
+// ── Generic City Blocks (Background & Density) ─────────────────────
+function GenericCityBlocks({ count = 30, xRange = [[-15, -5], [5, 15]], zRange = [-15, 10], heightRange = [2, 8], colors = ['#fff'], opacity = 1, glass = false, is1986 = false }) {
+    const blocks = useMemo(() => {
+        return Array.from({ length: count }).map(() => {
+            const isLeft = Math.random() > 0.5;
+            return {
+                x: isLeft ? randomRange(xRange[0][0], xRange[0][1]) : randomRange(xRange[1][0], xRange[1][1]),
+                z: randomRange(zRange[0], zRange[1]),
+                w: randomRange(1.5, 3.5),
+                h: randomRange(heightRange[0], heightRange[1]),
+                d: randomRange(1.5, 3.5),
+                rot: randomRange(-0.1, 0.1),
+                color: colors[Math.floor(Math.random() * colors.length)]
+            }
+        })
+    }, [count, xRange, zRange, heightRange, colors])
+
+    return (
+        <group>
+            {blocks.map((b, i) => (
+                <group key={i} position={[b.x, -1.5 + b.h / 2, b.z]} rotation={[0, b.rot, 0]}>
+                    <mesh castShadow receiveShadow>
+                        <boxGeometry args={[b.w, b.h, b.d]} />
+                        {glass
+                            ? <meshPhysicalMaterial color={b.color} transmission={0.9} metalness={0.8} roughness={0} transparent opacity={opacity} />
+                            : <meshStandardMaterial color={b.color} roughness={0.9} transparent opacity={opacity} />
+                        }
+                    </mesh>
+                    {is1986 && Math.random() > 0.5 && (
+                        <mesh position={[0, b.h / 2 + 0.5, 0]}>
+                            <cylinderGeometry args={[0.1, 0.1, 1, 8]} />
+                            <meshStandardMaterial color="#555" transparent opacity={opacity} />
+                        </mesh>
+                    )}
+                </group>
+            ))}
+        </group>
     )
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // ERA SCENE PACKAGES
-// era range: 0 (1986) → 4 (2026), epochs at 1,2,3,4
 // ─────────────────────────────────────────────────────────────────────
 
-// ERA 0 — 1986: bao cấp, khói, xe đạp, mậu dịch ─────────────────────
 function Era1986({ era }) {
     const op = clamp(1 - era * 1.2, 0, 1)
     if (op < 0.01) return null
     return (
         <group>
-            {/* Old brick factory */}
-            <mesh position={[-1.2, -0.3, 0]} castShadow>
-                <boxGeometry args={[2.2, 2.6, 1.6]} />
-                {mat('#4a3a2a', { transparent: true, opacity: op })}
-            </mesh>
-            {/* Chimneys */}
-            {[[-1.8, 1.4, 0], [-.5, 1.6, .3], [-.5, 1.7, -.3]].map(([x, y, z], i) => (
-                <mesh key={i} position={[x, y, z]} castShadow>
-                    <cylinderGeometry args={[0.13, 0.18, 2.4, 8]} />
-                    {mat('#2a2020', { transparent: true, opacity: op })}
-                </mesh>
-            ))}
-            <SmokePuff opacity={op} />
-            {/* Row of poor houses */}
-            {[3.5, 5.0, 6.5].map((x, i) => (
-                <group key={i} position={[x, -0.5, -1]}>
-                    <mesh><boxGeometry args={[1.2, 2, 1]} />{mat('#5a4a30', { transparent: true, opacity: op })}</mesh>
-                    <mesh position={[0, 1.1, 0]}><coneGeometry args={[0.8, 0.7, 4]} />{mat('#882222', { transparent: true, opacity: op })}</mesh>
-                    <mesh position={[0, .1, .51]}><boxGeometry args={[0.3, 0.5, 0.04]} />{mat('#333', { transparent: true, opacity: op })}</mesh>
+            <GenericCityBlocks count={25} heightRange={[1.5, 3.5]} colors={['#bcaaa4', '#a1887f', '#d7ccc8', '#8d6e63', '#ffccbc']} opacity={op} is1986 />
+            <PowerPoles opacity={op} />
+            <TreeForest count={15} opacity={op} type="autumn" />
+
+            {/* Main Block (Khu Tập Thể) */}
+            <group position={[-6, 0.5, -4]}>
+                <mesh castShadow><boxGeometry args={[4, 4, 2]} />{mat('#ffe0b2', { transparent: true, opacity: op })}</mesh>
+                {/* Balconies */}
+                {Array.from({ length: 12 }).map((_, i) => (
+                    <mesh key={i} position={[(i % 4 - 1.5) * 0.9, Math.floor(i / 4) * 1.2 - 0.5, 1.1]} castShadow>
+                        <boxGeometry args={[0.8, 0.4, 0.3]} />{mat('#ffccbc', { transparent: true, opacity: op })}
+                    </mesh>
+                ))}
+            </group>
+
+            {/* Propaganda Billboard */}
+            <group position={[6, 0, -2]} rotation={[0, -0.3, 0]}>
+                <mesh position={[0, 2, 0]} castShadow><boxGeometry args={[4, 2, 0.2]} />{mat('#e53935', { transparent: true, opacity: op })}</mesh>
+                <mesh position={[0, 2, 0.11]}><planeGeometry args={[3.8, 1.8]} />{mat('#ffc107', { transparent: true, opacity: op })}</mesh>
+                <mesh position={[-1.5, 0.5, 0]}><cylinderGeometry args={[0.1, 0.1, 3]} />{mat('#555', { transparent: true, opacity: op })}</mesh>
+                <mesh position={[1.5, 0.5, 0]}><cylinderGeometry args={[0.1, 0.1, 3]} />{mat('#555', { transparent: true, opacity: op })}</mesh>
+            </group>
+
+            <Crowd count={30} opacity={op} />
+            <Traffic count={12} type="bike" speedMul={0.6} opacity={op} />
+
+            {/* Market Stalls scattered */}
+            {[[-4, 2], [5, 4], [4, -1], [-4, -4]].map(([x, z], i) => (
+                <group key={i} position={[x, -0.9, z]} rotation={[0, Math.random() * Math.PI, 0]}>
+                    <mesh castShadow><boxGeometry args={[1.5, 0.8, 1]} />{mat('#8d6e63', { transparent: true, opacity: op })}</mesh>
+                    <mesh position={[0, 0.8, 0]} castShadow><coneGeometry args={[1.2, 0.5, 4]} />{mat('#e53935', { transparent: true, opacity: op })}</mesh>
                 </group>
             ))}
-            {/* Barrier gate */}
-            {[-3, -2, -1, 0, 1, 2].map((x, i) => (
-                <mesh key={i} position={[x + 2, -1.0, 2.5]} castShadow>
-                    <cylinderGeometry args={[0.05, 0.05, 1.0, 6]} />
-                    {mat('#cc2200', { transparent: true, opacity: op })}
-                </mesh>
-            ))}
-            <mesh position={[2, -0.5, 2.5]}>
-                <boxGeometry args={[4.2, 0.07, 0.07]} />
-                <meshStandardMaterial color="#ff3300" emissive="#440000" transparent opacity={op} />
-            </mesh>
-            {/* Market stalls */}
-            <MarketStall pos={[3, -0.5, 2]} opacity={op} />
-            <MarketStall pos={[5, -0.5, 2]} opacity={op} />
-            {/* Bicycles */}
-            <Bicycle pos={[-3.5, -1.1, 0.5]} opacity={op} />
-            <Bicycle pos={[-3.5, -1.1, -1.5]} opacity={op} />
-            {/* People */}
-            {[[-2.5, -0.9, 1], [1, -0.9, 2.5], [0, -0.9, -1]].map(([x, y, z], i) => (
-                <Person key={i} pos={[x, y, z]} color={['#885533', '#664422', '#774422'][i]} opacity={op} />
-            ))}
-            {/* Dim street lamp (unlit) */}
-            <StreetLamp pos={[-3.5, -1.5, 0]} era={0} opacity={op} />
-            <StreetLamp pos={[1.5, -1.5, 0]} era={0} opacity={op} />
-            {/* Dirt path texture overlay */}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.48, 0]}>
-                <planeGeometry args={[3.5, 18]} />
-                {mat('#2a1800', { transparent: true, opacity: op * 0.6 })}
-            </mesh>
         </group>
     )
 }
 
-// ERA 1 — 1996: xe máy xuất hiện, chợ sầm uất, đường trải nhựa ──────
 function Era1996({ era }) {
     const op = eraOpacity(era, 0.3, 1.0, 2.2)
     if (op < 0.01) return null
     return (
         <group>
-            {/* Shophouses */}
-            {[3.0, 4.8, 6.6].map((x, i) => (
-                <group key={i} position={[x, -0.2, -1.5]}>
-                    <mesh><boxGeometry args={[1.4, 2.8, 1.1]} />{mat(['#d4b896', '#c9b080', '#e0c8a0'][i], { transparent: true, opacity: op })}</mesh>
-                    <mesh position={[0, 1.5, 0]} rotation={[-0.05, 0, 0]}><boxGeometry args={[1.5, 0.15, 1.3]} />{mat('#884422', { transparent: true, opacity: op })}</mesh>
-                    <mesh position={[0.15, .1, .56]}><boxGeometry args={[0.4, 0.7, 0.04]} />{mat('#333', { transparent: true, opacity: op })}</mesh>
+            {/* Dense Tube Houses (Nhà ống) */}
+            <GenericCityBlocks count={40} heightRange={[2, 5.5]} colors={['#fff9c4', '#ffecb3', '#ffe0b2', '#f8bbd0', '#c8e6c9', '#bbdefb']} opacity={op} />
+            <PowerPoles opacity={op} />
+            <TreeForest count={30} opacity={op} type="green" />
+
+            <Crowd count={40} opacity={op} />
+            <Traffic count={18} type="mixed" speedMul={0.8} opacity={op} />
+
+            {/* Small shops */}
+            {Array.from({ length: 6 }).map((_, i) => (
+                <group key={i} position={[Math.random() > 0.5 ? -4 : 4, -0.5, -8 + i * 3]}>
+                    <mesh castShadow><boxGeometry args={[2, 2, 2]} />{mat('#ffffff', { transparent: true, opacity: op })}</mesh>
+                    <mesh position={[0, 1, 1.05]}><planeGeometry args={[1.8, 0.6]} />{mat('#d32f2f', { transparent: true, opacity: op })}</mesh>
+                    {/* Awning */}
+                    <mesh position={[0, 0.5, 1.4]} rotation={[0.3, 0, 0]}><boxGeometry args={[2, 0.1, 1]} />{mat('#1976d2', { transparent: true, opacity: op })}</mesh>
                 </group>
             ))}
-            {/* Motorbikes */}
-            <Motorbike pos={[-2, -1.1, 0.5]} color="#cc3300" opacity={op} />
-            <Motorbike pos={[0.5, -1.1, 0.5]} color="#2244aa" opacity={op} />
-            <Motorbike pos={[-1, -1.1, -1.5]} color="#116622" opacity={op} />
-            {/* Small factory still running but cleaner */}
-            <mesh position={[-2, -0.5, 0]} castShadow>
-                <boxGeometry args={[2, 2, 1.4]} />
-                {mat('#5a4a35', { transparent: true, opacity: op })}
-            </mesh>
-            <mesh position={[-2.6, 0.8, 0]}>
-                <cylinderGeometry args={[0.12, 0.16, 2, 8]} />
-                {mat('#333', { transparent: true, opacity: op * 0.5 })}
-            </mesh>
-            {/* People shopping */}
-            {[[-3, -0.9, 1.5], [2.5, -0.9, 1.5], [5, -0.9, 1.5], [4, -0.9, 0]].map(([x, y, z], i) => (
-                <Person key={i} pos={[x, y, z]} color={['#997755', '#cc9966', '#884422', '#553311'][i]} opacity={op} />
-            ))}
-            {/* Street lamps */}
-            <StreetLamp pos={[-3.8, -1.5, 1]} era={1.5} opacity={op} />
-            <StreetLamp pos={[3.8, -1.5, 1]} era={1.5} opacity={op} />
-            {/* Trees */}
-            <Tree pos={[-4, -1.5, -2]} opacity={op} />
-            <Tree pos={[4.5, -1.5, -2]} opacity={op} />
         </group>
     )
 }
 
-// ERA 2 — 2006: tòa nhà kính, ô tô, WTO ─────────────────────────────
 function Era2006({ era }) {
     const op = eraOpacity(era, 1.2, 2.0, 3.2)
     if (op < 0.01) return null
     return (
         <group>
-            {/* Medium-rise office buildings */}
-            <mesh position={[-1.5, 0.6, -1]} castShadow>
-                <boxGeometry args={[2, 4, 1.2]} />
-                <meshPhysicalMaterial color="#99bbdd" metalness={0.6} roughness={0.1} transparent opacity={op} emissive="#002244" emissiveIntensity={0.2} />
-            </mesh>
-            <mesh position={[2.5, 0.3, -1]} castShadow>
-                <boxGeometry args={[1.8, 3.2, 1.2]} />
-                <meshPhysicalMaterial color="#aaccee" metalness={0.6} roughness={0.1} transparent opacity={op} emissive="#002255" emissiveIntensity={0.2} />
-            </mesh>
-            {/* Supermarket / mall */}
-            <mesh position={[5, -.1, -1]} castShadow>
-                <boxGeometry args={[3, 2, 1.5]} />
-                {mat('#e8e8e8', { transparent: true, opacity: op })}
-            </mesh>
-            <mesh position={[5, .8, -0.25]}>
-                <boxGeometry args={[2.8, 0.25, 0.05]} />
-                <meshStandardMaterial color="#2255aa" emissive="#1133aa" emissiveIntensity={0.8} transparent opacity={op} />
-            </mesh>
-            {/* Cars */}
-            <Car pos={[-2.5, -1.1, 0.5]} color="#cc4422" opacity={op} />
-            <Car pos={[1, -1.1, 0.5]} color="#2255aa" opacity={op} />
-            <Car pos={[3.5, -1.1, -0.5]} color="#228844" opacity={op} />
-            {/* Keep some motorbikes */}
-            <Motorbike pos={[-1, -1.1, -1.5]} color="#994422" opacity={op * 0.7} />
-            <Motorbike pos={[0.5, -1.1, -1.5]} color="#1133aa" opacity={op * 0.7} />
-            {/* Trees - more green */}
-            {[-4.5, -3.8, 4.0, 5.5].map((x, i) => (
-                <Tree key={i} pos={[x, -1.5, -2]} size={1.1} opacity={op} />
+            {/* Medium glass buildings & concrete logic */}
+            <GenericCityBlocks count={20} heightRange={[3, 7]} colors={['#e3f2fd', '#bbdefb']} opacity={op} glass />
+            <GenericCityBlocks count={30} heightRange={[2, 5]} colors={['#ffffff', '#f5f5f5', '#eeeeee']} opacity={op} />
+            <TreeForest count={40} opacity={op} type="green" />
+
+            <Crowd count={45} opacity={op} />
+            <Traffic count={20} type="mixed" speedMul={1.2} opacity={op} />
+
+            {/* Billboards */}
+            {[[-5, -5], [5, 2]].map(([x, z], i) => (
+                <group key={i} position={[x, 3, z]} rotation={[0, x > 0 ? -0.5 : 0.5, 0]}>
+                    <mesh castShadow><boxGeometry args={[0.2, 4, 0.2]} />{mat('#757575', { transparent: true, opacity: op })}</mesh>
+                    <mesh position={[0, 2, 0]} castShadow><boxGeometry args={[0.3, 3, 4]} />{mat('#1e88e5', { transparent: true, opacity: op })}</mesh>
+                    <mesh position={[x > 0 ? -0.16 : 0.16, 2, 0]}><planeGeometry args={[3.8, 2.8]} rotation={[0, x > 0 ? -Math.PI / 2 : Math.PI / 2, 0]} />
+                        <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.5} transparent opacity={op} />
+                    </mesh>
+                </group>
             ))}
-            {/* Street lamps */}
-            {[-4, -2, 2, 4].map((x, i) => (
-                <StreetLamp key={i} pos={[x, -1.5, 1.5]} era={2.2} opacity={op} />
-            ))}
-            {/* People with modern clothes */}
-            {[[-3, -0.9, 1], [-1, -0.9, 1.8], [4.5, -0.9, 1.5], [6, -0.9, 0]].map(([x, y, z], i) => (
-                <Person key={i} pos={[x, y, z]} color={['#3355aa', '#aa5533', '#446699', '#885522'][i]} opacity={op} />
-            ))}
-            {/* Harbor crane */}
-            <mesh position={[-5.5, 0.5, 0.5]}>
-                <boxGeometry args={[0.15, 3, 0.15]} />
-                {mat('#ff8800', { transparent: true, opacity: op })}
-            </mesh>
-            <mesh position={[-5.1, 2, 0.5]}>
-                <boxGeometry args={[1, 0.12, 0.12]} />
-                {mat('#ff8800', { transparent: true, opacity: op })}
-            </mesh>
         </group>
     )
 }
 
-// ERA 3 — 2016: kỷ nguyên số, smartphone, grab, coffee, 4G ──────────
 function Era2016({ era }) {
     const op = eraOpacity(era, 2.2, 3.0, 3.8)
     if (op < 0.01) return null
     return (
         <group>
-            {/* Tall glass tower */}
-            <mesh position={[0, 1.5, -1.5]} castShadow>
-                <boxGeometry args={[2.2, 5.5, 1.4]} />
-                <meshPhysicalMaterial color="#aaddff" metalness={0.85} roughness={0.05} transparent opacity={op} emissive="#004488" emissiveIntensity={0.3} />
-            </mesh>
-            {/* Antenna blink */}
-            <mesh position={[0, 4.4, -1.5]}>
-                <cylinderGeometry args={[0.02, 0.02, 1.2, 6]} />
-                <meshStandardMaterial color="#00f5ff" emissive="#00f5ff" emissiveIntensity={2} transparent opacity={op} />
-            </mesh>
-            {/* Neon sign on tower */}
-            <mesh position={[0, 3, -0.81]}>
-                <boxGeometry args={[1.8, 0.3, 0.04]} />
-                <meshStandardMaterial color="#ff4488" emissive="#ff2266" emissiveIntensity={2} transparent opacity={op} />
-            </mesh>
-            {/* Cafe shops */}
-            <CafeShop pos={[4, -0.5, 0]} opacity={op} />
-            <CafeShop pos={[-4.5, -0.5, -0.5]} opacity={op} />
-            {/* Cars - more modern */}
-            <Car pos={[-2.5, -1.1, 0.5]} color="#eeeeee" opacity={op} modern />
-            <Car pos={[2, -1.1, 0.5]} color="#222222" opacity={op} modern />
-            {/* Grab delivery bikes with riders */}
-            <Motorbike pos={[0.5, -1.1, -1.5]} color="#00cc44" opacity={op} />
-            <Motorbike pos={[-1, -1.1, 1.5]} color="#00aa33" opacity={op} />
-            {/* 4G tower */}
-            <TowerCell pos={[-6, -1.5, -2]} opacity={op} />
-            {/* Many trees */}
-            {[-5, -3.5, 3, 5, 6.5].map((x, i) => (
-                <Tree key={i} pos={[x, -1.5, -2.5]} size={1.2} opacity={op} />
+            {/* High-rise & modern commercial */}
+            <GenericCityBlocks count={40} heightRange={[4, 10]} colors={['#e0f7fa', '#ffffff', '#f3e5f5']} opacity={op} glass />
+            <TreeForest count={50} opacity={op} type="green" />
+
+            {/* Giant LED Screens on buildings */}
+            {Array.from({ length: 4 }).map((_, i) => (
+                <mesh key={i} position={[Math.random() > 0.5 ? -6 : 6, 4, -8 + i * 4]}>
+                    <boxGeometry args={[0.2, 3, 5]} />
+                    <meshStandardMaterial color={['#00e676', '#ff4081', '#00e5ff', '#ffca28'][i]} emissive={['#00e676', '#ff4081', '#00e5ff', '#ffca28'][i]} emissiveIntensity={1.5} transparent opacity={op} />
+                </mesh>
             ))}
-            {/* People with phones */}
-            {[[-3.5, -0.9, 1.5], [-2, -0.9, 1.8], [3, -0.9, 1.5], [5.5, -0.9, 1], [1, -0.9, 2], [-1, -0.9, 2]].map(([x, y, z], i) => (
-                <group key={i}>
-                    <Person pos={[x, y, z]} color={['#3355aa', '#885522', '#446699', '#aa3366', '#224488', '#665533'][i]} opacity={op} />
-                    {/* Phone in hand */}
-                    <mesh position={[x + 0.12, y + 0.15, z + 0.1]}>
-                        <boxGeometry args={[0.05, 0.09, 0.01]} />
-                        <meshStandardMaterial color="#111" emissive="#334455" emissiveIntensity={0.5} transparent opacity={op} />
-                    </mesh>
-                </group>
-            ))}
-            {/* Park bench + greenery */}
-            <mesh position={[-5.5, -1.3, 0.5]}>
-                <boxGeometry args={[0.8, 0.1, 0.3]} />
-                {mat('#885533', { transparent: true, opacity: op })}
-            </mesh>
+
+            <Crowd count={60} opacity={op} />
+            <Traffic count={25} type="car" speedMul={1.5} opacity={op} />
         </group>
     )
 }
 
-// ERA 4 — 2026: xe điện, metro, pin mặt trời, thành phố xanh ────────
 function Era2026({ era }) {
     const op = clamp((era - 3.2) * 1.2, 0, 1)
     if (op < 0.01) return null
     return (
         <group>
-            {/* Supertall glass twin towers */}
-            <mesh position={[-1.8, 2.5, -2]} castShadow>
-                <boxGeometry args={[1.8, 7, 1.3]} />
-                <meshPhysicalMaterial color="#bbddff" metalness={0.9} roughness={0.04} transparent opacity={op} emissive="#003366" emissiveIntensity={0.25} />
-            </mesh>
-            <mesh position={[1.8, 2.0, -2]} castShadow>
-                <boxGeometry args={[1.8, 6, 1.3]} />
-                <meshPhysicalMaterial color="#cce8ff" metalness={0.9} roughness={0.04} transparent opacity={op} emissive="#002255" emissiveIntensity={0.25} />
-            </mesh>
-            {/* Sky bridge between towers */}
-            <mesh position={[0, 3.5, -2]}>
-                <boxGeometry args={[1.8, 0.2, 0.8]} />
-                <meshPhysicalMaterial color="#aaddff" metalness={0.8} roughness={0.08} transparent opacity={op * 0.8} />
-            </mesh>
-            {/* Neon accents on towers */}
-            {[-1.8, 1.8].map((x, i) => (
-                <mesh key={i} position={[x, 2.5, -1.35]}>
-                    <boxGeometry args={[0.05, 7, 0.05]} />
-                    <meshStandardMaterial color="#00f5ff" emissive="#00f5ff" emissiveIntensity={1.5} transparent opacity={op} />
+            {/* Supertall dense glass city */}
+            <GenericCityBlocks count={60} heightRange={[6, 18]} colors={['#ffffff', '#e0f7fa', '#e3f2fd']} opacity={op} glass />
+            <TreeForest count={80} opacity={op} type="green" />
+
+            {/* Neon Rings / Sky Bridges */}
+            {Array.from({ length: 5 }).map((_, i) => (
+                <mesh key={i} position={[0, 8 + i * 2.5, -10 + i * 2]} rotation={[-Math.PI / 2, 0, 0]}>
+                    <torusGeometry args={[Math.random() * 4 + 3, 0.1, 8, 50]} />
+                    <meshStandardMaterial color="#00e5ff" emissive="#00e5ff" emissiveIntensity={2} transparent opacity={op} />
                 </mesh>
             ))}
-            {/* Solar farm on rooftops */}
-            <SolarPanel pos={[4.5, 0.5, -1.5]} opacity={op} />
-            <SolarPanel pos={[4.5, 0.5, -0.5]} opacity={op} />
-            {/* Metro elevated track */}
-            <MetroTrack opacity={op} />
-            {/* VinFast EVs */}
-            <Car pos={[-3, -1.1, 0.5]} color="#00ff88" opacity={op} modern />
-            <Car pos={[0.5, -1.1, 0.5]} color="#ffffff" opacity={op} modern />
-            <Car pos={[3.5, -1.1, -0.5]} color="#0044ff" opacity={op} modern />
-            {/* EV chargers */}
-            <EVCharger pos={[-5, -1.4, 1]} opacity={op} />
-            <EVCharger pos={[-5.5, -1.4, 1]} opacity={op} />
-            {/* Dense tree-lined boulevard */}
-            {[-5, -4, -3, 3, 4, 5, 6].map((x, i) => (
-                <Tree key={i} pos={[x, -1.5, -3]} size={1.4} opacity={op} />
+
+            <Crowd count={80} opacity={op} />
+            <Traffic count={30} type="car" speedMul={2.0} opacity={op} />
+
+            {/* Flying Drones */}
+            {Array.from({ length: 8 }).map((_, i) => (
+                <group key={i} position={[randomRange(-8, 8), randomRange(7, 12), randomRange(-10, 10)]}>
+                    <mesh><boxGeometry args={[0.4, 0.1, 0.4]} /><meshStandardMaterial color="#fff" transparent opacity={op} /></mesh>
+                    <mesh position={[0, -0.1, 0]}><sphereGeometry args={[0.05]} /><meshStandardMaterial color="#f00" emissive="#f00" emissiveIntensity={3} transparent opacity={op} /></mesh>
+                </group>
             ))}
-            {/* Vertical garden on building face */}
-            <mesh position={[4.5, 0, -1.5]}>
-                <boxGeometry args={[0.08, 3, 1.6]} />
-                <meshStandardMaterial color="#2a7a20" transparent opacity={op * 0.8} />
-            </mesh>
-            {/* 5G / smart city tower */}
-            <TowerCell pos={[7, -1.5, -1]} opacity={op} />
-            {/* Smart traffic light */}
-            <mesh position={[3.8, -1.5, 1.8]}>
-                <cylinderGeometry args={[0.04, 0.04, 2.4, 6]} />
-                {mat('#aaa', { transparent: true, opacity: op })}
-            </mesh>
-            <mesh position={[3.8, -0.15, 1.8]}>
-                <boxGeometry args={[0.15, 0.5, 0.15]} />
-                {mat('#222', { transparent: true, opacity: op })}
-            </mesh>
-            <mesh position={[3.8, -0.05, 1.95]}>
-                <sphereGeometry args={[0.065, 8, 8]} />
-                <meshStandardMaterial color="#00ff44" emissive="#00ff44" emissiveIntensity={2} transparent opacity={op} />
-            </mesh>
-            {/* People - diverse, modern */}
-            {[[-3.5, -0.9, 1.5], [-2, -0.9, 1.8], [4.5, -0.9, 1.5], [6, -0.9, 0.5], [1.5, -0.9, 2], [-.5, -0.9, 2], [2.5, -0.9, 1.5]].map(([x, y, z], i) => (
-                <Person key={i} pos={[x, y, z]} color={['#3355aa', '#995522', '#446699', '#aa3366', '#224488', '#008866', '#553388'][i]} opacity={op} />
-            ))}
-            {/* Neon ring plaza at base */}
+
             <mesh position={[0, -1.45, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[3.5, 0.05, 8, 80]} />
-                <meshStandardMaterial color="#00f5ff" emissive="#00f5ff" emissiveIntensity={2} transparent opacity={op} />
-            </mesh>
-            {/* Park / fountain */}
-            <mesh position={[-5.5, -1.48, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                <circleGeometry args={[0.8, 16]} />
-                <meshStandardMaterial color="#1a5530" transparent opacity={op} />
-            </mesh>
-            <mesh position={[-5.5, -1.45, 0]}>
-                <cylinderGeometry args={[0.15, 0.2, 0.1, 12]} />
-                <meshStandardMaterial color="#88ccff" emissive="#4488ff" emissiveIntensity={0.5} transparent opacity={op} />
+                <torusGeometry args={[8, 0.05, 8, 100]} />
+                <meshStandardMaterial color="#00e5ff" emissive="#00e5ff" emissiveIntensity={2.5} transparent opacity={op} />
             </mesh>
         </group>
     )
@@ -749,41 +403,24 @@ function Era2026({ era }) {
 // ── Red Dot (gamification) ─────────────────────────────────────────
 function RedDot3D({ position, onClick, resolved }) {
     const ref = useRef()
-    const ring = useRef()
     useFrame((state, dt) => {
         if (!ref.current || resolved) return
         ref.current.rotation.y += dt * 1.8
         ref.current.scale.setScalar(1 + Math.sin(state.clock.elapsedTime * 3.5) * 0.18)
-        if (ring.current) {
-            const t = (Math.sin(state.clock.elapsedTime * 2.5) + 1) / 2
-            ring.current.material.opacity = lerp(0.15, 0.7, t)
-            ring.current.scale.setScalar(lerp(1, 2.2, t))
-        }
     })
     if (resolved) return null
     return (
         <group position={position}>
             <mesh ref={ref} onClick={onClick}>
-                <sphereGeometry args={[0.13, 12, 12]} />
-                <meshStandardMaterial color="#ff2200" emissive="#ff0000" emissiveIntensity={2.5} />
+                <sphereGeometry args={[0.3, 16, 16]} />
+                <meshStandardMaterial color="#ff1744" emissive="#ff1744" emissiveIntensity={2} transparent opacity={0.9} />
             </mesh>
-            <mesh ref={ring} rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.28, 0.025, 6, 30]} />
-                <meshStandardMaterial color="#ff4400" emissive="#ff4400" emissiveIntensity={1} transparent opacity={0.4} />
+            {/* Pulsing ring indicator */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[0.4, 0.45, 32]} />
+                <meshStandardMaterial color="#ff1744" emissive="#ff1744" emissiveIntensity={2} transparent opacity={0.6} />
             </mesh>
         </group>
-    )
-}
-
-// ── Cyber ground grid ──────────────────────────────────────────────
-function CyberGrid({ era }) {
-    const t = clamp(era / 4, 0, 1)
-    const color = new THREE.Color().lerpColors(new THREE.Color('#1a1400'), new THREE.Color('#001133'), t)
-    return (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.5, 0]}>
-            <planeGeometry args={[35, 35, 20, 20]} />
-            <meshStandardMaterial color={color} wireframe transparent opacity={0.08} emissive={color} emissiveIntensity={0.4} />
-        </mesh>
     )
 }
 
@@ -791,46 +428,76 @@ function CyberGrid({ era }) {
 function SceneContent({ year, resolvedDots, onDotClick }) {
     const era = clamp((year - 1986) / (2026 - 1986) * 4, 0, 4)
 
-    const dotPositions = [[-1.8, 1.8, 0.3], [2.1, 0.5, 1.0], [0.3, -0.2, 2.2]]
     const showDots = year <= 1995
+    const dotPositions = [[-2.5, 2.5, -2], [3.5, 1.0, 1.5], [0, 0, 4]]
 
-    // Dynamic lighting by era
-    const ambientInt = lerp(0.2, 0.5, clamp(era / 4, 0, 1))
-    const sunColor = era < 1 ? '#ff8840' : era < 3 ? '#ffffff' : '#cceeff'
-    const glowColor = era < 1 ? '#ff4400' : era < 2 ? '#ffcc44' : '#00f5ff'
-    const glowInt = era < 0.5 ? 0 : clamp((era - 0.5) * 0.6, 0, 2)
+    // SMOOTH VIBRANT COLORS
+    const skyColor = useMemo(() => {
+        const colors = ['#90a4ae', '#81d4fa', '#29b6f6', '#ffb74d', '#e0f7fa']
+        const i = Math.floor(era)
+        if (i >= 4) return colors[4]
+        return colorLerp(colors[i], colors[i + 1], era - i)
+    }, [era])
+
+    const sunColor = useMemo(() => {
+        const colors = ['#ffffff', '#ffffff', '#ffffff', '#fff3e0', '#ffffff']
+        const i = Math.floor(era)
+        if (i >= 4) return colors[4]
+        return colorLerp(colors[i], colors[i + 1], era - i)
+    }, [era])
 
     return (
         <>
-            <DynamicBackground era={era} />
-            <fog attach="fog" args={[era < 1 ? '#000810' : '#000810', 18, 45]} />
+            <color attach="background" args={[skyColor]} />
+            <fog attach="fog" args={[skyColor, 15, 65]} />
 
-            <ambientLight intensity={ambientInt} color="#001133" />
-            <directionalLight position={[6, 10, 4]} intensity={0.9} color={sunColor} castShadow />
-            <pointLight position={[-5, 4, -4]} intensity={0.6} color="#ff6600" />
-            <pointLight position={[5, 5, 4]} intensity={glowInt} color={glowColor} />
-            <pointLight position={[0, 3, 3]} intensity={glowInt * 0.8} color="#00f5ff" />
+            <ambientLight intensity={1.5} color="#ffffff" />
 
-            <Stars />
+            <directionalLight
+                position={[15, 25, 10]}
+                intensity={2.0}
+                color={sunColor}
+                castShadow
+                shadow-mapSize-width={2048}
+                shadow-mapSize-height={2048}
+                shadow-camera-far={50}
+                shadow-camera-left={-20}
+                shadow-camera-right={20}
+                shadow-camera-top={20}
+                shadow-camera-bottom={-20}
+                shadow-bias={-0.0005}
+            />
+
+            <directionalLight position={[-15, 15, -15]} intensity={1.2} color="#e3f2fd" />
+
+            <Environment preset="city" />
+
             <Road era={era} />
-            <CyberGrid era={era} />
 
-            {/* All era scenes — opacity blended by era value */}
-            <Era1986 era={era} />
-            <Era1996 era={era} />
-            <Era2006 era={era} />
-            <Era2016 era={era} />
-            <Era2026 era={era} />
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.49, 0]} receiveShadow>
+                <planeGeometry args={[100, 100, 40, 40]} />
+                <meshStandardMaterial color="#00e5ff" wireframe transparent opacity={0.1} emissive="#00e5ff" emissiveIntensity={0.2} />
+            </mesh>
 
-            {/* Red Dots for gamification */}
+            <group position={[0, 0, 0]}>
+                <Era1986 era={era} />
+                <Era1996 era={era} />
+                <Era2006 era={era} />
+                <Era2016 era={era} />
+                <Era2026 era={era} />
+            </group>
+
             {showDots && dotPositions.map((pos, i) => (
                 <RedDot3D key={i} position={pos} onClick={() => onDotClick(i)} resolved={resolvedDots.includes(i)} />
             ))}
 
+            <ContactShadows resolution={1024} scale={50} blur={2.5} opacity={0.5} far={15} color="#000000" />
+
             <OrbitControls
                 makeDefault enableDamping dampingFactor={0.05}
-                minDistance={4} maxDistance={22}
+                minDistance={5} maxDistance={35}
                 maxPolarAngle={Math.PI * 0.48}
+                autoRotate={false}
             />
         </>
     )
@@ -841,10 +508,9 @@ export default function Scene3D({ year, resolvedDots, onDotClick }) {
     return (
         <Canvas
             shadows
-            camera={{ position: [0, 4, 10], fov: 55 }}
+            camera={{ position: [0, 8, 20], fov: 50 }}
             style={{ width: '100%', height: '100%' }}
-            gl={{ antialias: true, alpha: false }}
-            dpr={[1, 1.5]}
+            gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping }}
         >
             <SceneContent year={year} resolvedDots={resolvedDots} onDotClick={onDotClick} />
         </Canvas>
