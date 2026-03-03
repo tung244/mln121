@@ -1,6 +1,6 @@
 import { useRef, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, Environment, ContactShadows } from '@react-three/drei'
+import { OrbitControls, Environment, ContactShadows, Html, Float } from '@react-three/drei'
 import * as THREE from 'three'
 
 // ── Math helpers ────────────────────────────────────────────────────
@@ -424,8 +424,43 @@ function RedDot3D({ position, onClick, resolved }) {
     )
 }
 
+// ── Historical Hotspots ─────────────────────────────────────────────
+const HOTSPOTS = [
+    { year: 1986, pos: [-3, 1, 0], title: '1986', desc: 'Chỉ thị 100 & Khoán 10', icon: '📝' },
+    { year: 1996, pos: [3, 2, -4], title: '1995', desc: 'Bình thường hóa quan hệ Mỹ', icon: '🤝' },
+    { year: 2006, pos: [-4, 3, -6], title: '2007', desc: 'Gia nhập WTO', icon: '🌐' },
+    { year: 2016, pos: [5, 4, -8], title: '2016', desc: 'Chuyển đổi quốc gia số', icon: '📱' },
+    { year: 2026, pos: [0, 5, -10], title: '2026', desc: 'Kỷ nguyên Xanh & AI', icon: '🌱' }
+]
+
+function HistoricalHotspots({ year }) {
+    return (
+        <group>
+            {HOTSPOTS.map((h, i) => {
+                const isActive = year >= h.year && year < (HOTSPOTS[i + 1]?.year || 2027)
+                if (!isActive) return null
+                return (
+                    <Float key={i} speed={2} rotationIntensity={0} floatIntensity={0.5} position={h.pos}>
+                        <Html center distanceFactor={15} zIndexRange={[100, 0]}>
+                            <div className="flex flex-col items-center animate-pulse-slow group cursor-pointer" style={{ pointerEvents: 'auto' }}>
+                                <div className="text-4xl filter drop-shadow-[0_0_10px_rgba(0,255,255,0.8)] transition-transform group-hover:scale-125 mb-2">
+                                    {h.icon}
+                                </div>
+                                <div className="bg-black/80 backdrop-blur-md border border-cyan-400 rounded-xl p-3 text-center pointer-events-none transform scale-0 group-hover:scale-100 transition-transform origin-bottom shadow-[0_0_20px_rgba(0,255,255,0.3)] min-w-[160px]">
+                                    <div className="font-orbitron text-cyan-300 text-sm font-bold mb-1">{h.title}</div>
+                                    <div className="font-mono text-xs text-white leading-tight">{h.desc}</div>
+                                </div>
+                            </div>
+                        </Html>
+                    </Float>
+                )
+            })}
+        </group>
+    )
+}
+
 // ── Main Scene Content ─────────────────────────────────────────────
-function SceneContent({ year, resolvedDots, onDotClick }) {
+function SceneContent({ year, resolvedDots, onDotClick, isCinematic }) {
     const era = clamp((year - 1986) / (2026 - 1986) * 4, 0, 4)
 
     const showDots = year <= 1995
@@ -445,6 +480,26 @@ function SceneContent({ year, resolvedDots, onDotClick }) {
         if (i >= 4) return colors[4]
         return colorLerp(colors[i], colors[i + 1], era - i)
     }, [era])
+
+    // Cinematic Camera Path
+    const controlsRef = useRef()
+    useFrame((state) => {
+        if (isCinematic) {
+            // Bay lượn đẹp mắt qua thành phố
+            const targetX = Math.sin(era * Math.PI * 0.4) * 12
+            const targetY = 8 + era * 2.5
+            const targetZ = 20 - era * 5
+
+            state.camera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 0.02)
+
+            // Xoay camera nhìn mượt về phía trước
+            const lookTarget = new THREE.Vector3(0, era * 2, -10)
+            if (controlsRef.current) {
+                controlsRef.current.target.lerp(lookTarget, 0.05)
+                controlsRef.current.update()
+            }
+        }
+    })
 
     return (
         <>
@@ -487,6 +542,8 @@ function SceneContent({ year, resolvedDots, onDotClick }) {
                 <Era2026 era={era} />
             </group>
 
+            <HistoricalHotspots year={year} />
+
             {showDots && dotPositions.map((pos, i) => (
                 <RedDot3D key={i} position={pos} onClick={() => onDotClick(i)} resolved={resolvedDots.includes(i)} />
             ))}
@@ -494,17 +551,19 @@ function SceneContent({ year, resolvedDots, onDotClick }) {
             <ContactShadows resolution={1024} scale={50} blur={2.5} opacity={0.5} far={15} color="#000000" />
 
             <OrbitControls
+                ref={controlsRef}
                 makeDefault enableDamping dampingFactor={0.05}
                 minDistance={5} maxDistance={35}
                 maxPolarAngle={Math.PI * 0.48}
                 autoRotate={false}
+                enabled={!isCinematic}
             />
         </>
     )
 }
 
 // ── Exported Canvas ────────────────────────────────────────────────
-export default function Scene3D({ year, resolvedDots, onDotClick }) {
+export default function Scene3D({ year, resolvedDots, onDotClick, isCinematic }) {
     return (
         <Canvas
             shadows
@@ -512,7 +571,7 @@ export default function Scene3D({ year, resolvedDots, onDotClick }) {
             style={{ width: '100%', height: '100%' }}
             gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping }}
         >
-            <SceneContent year={year} resolvedDots={resolvedDots} onDotClick={onDotClick} />
+            <SceneContent year={year} resolvedDots={resolvedDots} onDotClick={onDotClick} isCinematic={isCinematic} />
         </Canvas>
     )
 }

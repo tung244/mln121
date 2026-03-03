@@ -16,7 +16,7 @@ export default function TimelineSlider({ year, onChange }) {
                     </span>
                 </div>
                 <div className="font-orbitron text-2xl font-black neon-gold tracking-widest">
-                    {year}
+                    {Math.floor(year)}
                 </div>
             </div>
 
@@ -25,6 +25,7 @@ export default function TimelineSlider({ year, onChange }) {
                 type="range"
                 min={min}
                 max={max}
+                step="0.1"
                 value={year}
                 onChange={(e) => onChange(Number(e.target.value))}
                 className="timeline-slider w-full"

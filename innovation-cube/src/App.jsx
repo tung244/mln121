@@ -116,7 +116,24 @@ export default function App() {
   const [sparks, setSparks] = useState([])
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_key') || '')
   const [showKeyModal, setShowKeyModal] = useState(false)
+  const [isCinematic, setIsCinematic] = useState(false)
   const lastSlideRef = useRef(0)
+
+  // Auto-tour logic
+  useEffect(() => {
+    if (!isCinematic) return
+    const interval = setInterval(() => {
+      setYear((prev) => {
+        const next = prev + 0.1
+        if (next >= 2026) {
+          setIsCinematic(false)
+          return 2026
+        }
+        return next
+      })
+    }, 40) // 40ms * 100 = 4 seconds per year = 16 seconds total for 40 years. Good speed.
+    return () => clearInterval(interval)
+  }, [isCinematic])
 
   const addToast = useCallback((message, type = 'xp', icon = '⚡', duration = 2500) => {
     const id = Date.now() + Math.random()
@@ -192,13 +209,13 @@ export default function App() {
         <div className="fixed inset-0 overflow-hidden cyber-grid" style={{ background: 'radial-gradient(ellipse at 50% 40%, #020c1f 0%, #000 100%)' }}>
           {/* 3D Scene — full background */}
           <div className="absolute inset-0 z-0">
-            <Scene3D year={year} resolvedDots={resolvedDots} onDotClick={handleDotClick} />
+            <Scene3D year={year} resolvedDots={resolvedDots} onDotClick={handleDotClick} isCinematic={isCinematic} />
           </div>
 
           {/* HUD layer */}
           <div className="absolute inset-0 z-10 pointer-events-none">
             <div className="pointer-events-auto">
-              <HUD year={year} resolvedCount={resolvedDots.length} />
+              <HUD year={Math.floor(year)} resolvedCount={resolvedDots.length} />
             </div>
           </div>
 
@@ -251,6 +268,18 @@ export default function App() {
               ✓ AI active
             </button>
           )}
+
+          {/* Cinematic button (top center) */}
+          <button
+            onClick={() => {
+              if (year >= 2026 && !isCinematic) setYear(1986);
+              setIsCinematic(!isCinematic)
+            }}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-20 px-5 py-2 rounded-xl font-orbitron text-xs font-bold transition-all hover:scale-105 shadow-[0_0_15px_rgba(0,245,255,0.3)]
+               ${isCinematic ? 'bg-red-900 border-red-500 text-red-400' : 'bg-cyan-900/80 border-cyan-400 text-cyan-200 backdrop-blur-md'} border`}
+          >
+            {isCinematic ? '⏹ Dừng Điện Ảnh' : '🎥 Cinematic Tour'}
+          </button>
 
           {/* Hint for 1986 dots */}
           {year <= 1995 && resolvedDots.length < 3 && (
