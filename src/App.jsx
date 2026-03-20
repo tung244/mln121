@@ -328,7 +328,7 @@ export default function App() {
             onClick={() => setShowGLBViewer(true)}
             className="fixed top-16 left-1/2 -translate-x-1/2 z-20 px-5 py-2 rounded-xl font-orbitron text-xs font-bold transition-all hover:scale-105 shadow-[0_0_15px_rgba(255,100,255,0.3)] bg-purple-900/80 border-purple-400 text-purple-200 backdrop-blur-md border"
           >
-            👁️ Xem 9.glb
+            👁️ Xem 6.glb
           </button>
 
           {/* Hint for 1986 dots */}

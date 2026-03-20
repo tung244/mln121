@@ -12,9 +12,10 @@ const mqttConfig = {
   },
   // Scene messages
   sceneMessages: {
-    '9': 'DH6',
-    '11': 'DH8',
-    '14': 'DH10',
+    '6': 'DH6',
+    '9': 'DH8',
+    '11': 'DH10',
+    '14': 'DH11',
   },
 };
 

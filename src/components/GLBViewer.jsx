@@ -89,15 +89,16 @@ function FpsControls({ onUnlock, eyeHeight = 0.8 }) {
 
 export default function GLBViewer({ onClose }) {
   const [viewMode, setViewMode] = useState('fps') // 'fps' or 'orbit'
-  const [modelUrl, setModelUrl] = useState('/9.glb')
+  const [modelUrl, setModelUrl] = useState('/6.glb')
   const [mqttConnected, setMqttConnected] = useState(false)
 
   // Scene navigation sequence
-  const scenes = ['/9.glb', '/11.glb', '/14.glb']
+  const scenes = ['/6.glb', '/9.glb', '/11.glb', '/14.glb']
   const currentSceneIndex = scenes.indexOf(modelUrl)
 
   // Map each scene to an audio source (ví dụ: cần cập nhật link thực tế)
   const sceneAudioMap = {
+    '/6.glb': '/audio/6.mp3',
     '/9.glb': '/audio/9.mp3',
     '/11.glb': '/audio/11.mp3',
     '/14.glb': '/audio/14.mp3'
@@ -112,7 +113,8 @@ export default function GLBViewer({ onClose }) {
         preloadScene(scenes[currentSceneIndex + 2])
       }
       // Gửi tín hiệu MQTT cho scene tiếp theo
-      if (nextScene === '/9.glb') publishSceneSignal('9')
+      if (nextScene === '/6.glb') publishSceneSignal('6')
+      else if (nextScene === '/9.glb') publishSceneSignal('9')
       else if (nextScene === '/11.glb') publishSceneSignal('11')
       else if (nextScene === '/14.glb') publishSceneSignal('14')
     }
@@ -127,7 +129,8 @@ export default function GLBViewer({ onClose }) {
         preloadScene(scenes[currentSceneIndex - 2])
       }
       // Gửi tín hiệu MQTT cho scene trước đó
-      if (prevScene === '/9.glb') publishSceneSignal('9')
+      if (prevScene === '/6.glb') publishSceneSignal('6')
+      else if (prevScene === '/9.glb') publishSceneSignal('9')
       else if (prevScene === '/11.glb') publishSceneSignal('11')
       else if (prevScene === '/14.glb') publishSceneSignal('14')
     }
@@ -141,7 +144,7 @@ export default function GLBViewer({ onClose }) {
     client.on('connect', () => {
       setMqttConnected(true)
       // Gửi tín hiệu khi kết nối thành công
-      setTimeout(() => publishSceneSignal('9'), 500)
+      setTimeout(() => publishSceneSignal('6'), 500)
     })
 
     client.on('close', () => {
@@ -153,7 +156,7 @@ export default function GLBViewer({ onClose }) {
     })
 
     // Preload next scene khi viewer mở
-    preloadScene('/11.glb')
+    preloadScene('/9.glb')
 
     return () => {
       disconnectMqtt()
@@ -235,7 +238,7 @@ export default function GLBViewer({ onClose }) {
 
       <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-center transform hover:scale-105 transition-transform duration-500">
         <h1 className="text-5xl md:text-7xl font-orbitron font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500 drop-shadow-[0_0_15px_rgba(0,255,255,0.6)] animate-pulse">
-          {modelUrl === '/9.glb' ? '9' : modelUrl === '/11.glb' ? '11' : '14'}
+          {modelUrl === '/6.glb' ? '6' : modelUrl === '/9.glb' ? '9' : modelUrl === '/11.glb' ? '11' : '14'}
         </h1>
         <div className="text-cyan-200 mt-2 font-mono tracking-[0.3em] uppercase text-sm opacity-80 backdrop-blur-sm border border-cyan-500/30 px-6 py-1 rounded-full inline-block bg-black/40">
           Kỷ Nguyên Đổi Mới Số
