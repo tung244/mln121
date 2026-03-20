@@ -3,6 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, useGLTF, PointerLockControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { connectMqtt, disconnectMqtt, publishMessage, publishSceneSignal } from '../services/mqttService'
+import MapAudioPlayer from './MapAudioPlayer'
 
 function Model({ url }) {
   const { scene } = useGLTF(url)
@@ -88,12 +89,19 @@ function FpsControls({ onUnlock, eyeHeight = 0.8 }) {
 
 export default function GLBViewer({ onClose }) {
   const [viewMode, setViewMode] = useState('fps') // 'fps' or 'orbit'
-  const [modelUrl, setModelUrl] = useState('/Scene3.glb')
+  const [modelUrl, setModelUrl] = useState('/9.glb')
   const [mqttConnected, setMqttConnected] = useState(false)
 
   // Scene navigation sequence
-  const scenes = ['/Scene3.glb', '/Scene_11.glb', '/Current.glb']
+  const scenes = ['/9.glb', '/11.glb', '/14.glb']
   const currentSceneIndex = scenes.indexOf(modelUrl)
+
+  // Map each scene to an audio source (ví dụ: cần cập nhật link thực tế)
+  const sceneAudioMap = {
+    '/9.glb': '/audio/9.mp3',
+    '/11.glb': '/audio/11.mp3',
+    '/14.glb': '/audio/14.mp3'
+  }
 
   const handleNext = () => {
     if (currentSceneIndex < scenes.length - 1) {
@@ -104,9 +112,9 @@ export default function GLBViewer({ onClose }) {
         preloadScene(scenes[currentSceneIndex + 2])
       }
       // Gửi tín hiệu MQTT cho scene tiếp theo
-      if (nextScene === '/Scene3.glb') publishSceneSignal('Scene3')
-      else if (nextScene === '/Scene_11.glb') publishSceneSignal('Scene_11')
-      else if (nextScene === '/Current.glb') publishSceneSignal('Current')
+      if (nextScene === '/9.glb') publishSceneSignal('9')
+      else if (nextScene === '/11.glb') publishSceneSignal('11')
+      else if (nextScene === '/14.glb') publishSceneSignal('14')
     }
   }
 
@@ -119,9 +127,9 @@ export default function GLBViewer({ onClose }) {
         preloadScene(scenes[currentSceneIndex - 2])
       }
       // Gửi tín hiệu MQTT cho scene trước đó
-      if (prevScene === '/Scene3.glb') publishSceneSignal('Scene3')
-      else if (prevScene === '/Scene_11.glb') publishSceneSignal('Scene_11')
-      else if (prevScene === '/Current.glb') publishSceneSignal('Current')
+      if (prevScene === '/9.glb') publishSceneSignal('9')
+      else if (prevScene === '/11.glb') publishSceneSignal('11')
+      else if (prevScene === '/14.glb') publishSceneSignal('14')
     }
   }
 
@@ -133,7 +141,7 @@ export default function GLBViewer({ onClose }) {
     client.on('connect', () => {
       setMqttConnected(true)
       // Gửi tín hiệu khi kết nối thành công
-      setTimeout(() => publishSceneSignal('Scene3'), 500)
+      setTimeout(() => publishSceneSignal('9'), 500)
     })
 
     client.on('close', () => {
@@ -145,7 +153,7 @@ export default function GLBViewer({ onClose }) {
     })
 
     // Preload next scene khi viewer mở
-    preloadScene('/Scene_11.glb')
+    preloadScene('/11.glb')
 
     return () => {
       disconnectMqtt()
@@ -227,7 +235,7 @@ export default function GLBViewer({ onClose }) {
 
       <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-center transform hover:scale-105 transition-transform duration-500">
         <h1 className="text-5xl md:text-7xl font-orbitron font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500 drop-shadow-[0_0_15px_rgba(0,255,255,0.6)] animate-pulse">
-          {modelUrl === '/Scene3.glb' ? 'SCENE 3' : modelUrl === '/Scene_11.glb' ? 'SCENE 11' : 'CURRENT OBJECT'}
+          {modelUrl === '/9.glb' ? '9' : modelUrl === '/11.glb' ? '11' : '14'}
         </h1>
         <div className="text-cyan-200 mt-2 font-mono tracking-[0.3em] uppercase text-sm opacity-80 backdrop-blur-sm border border-cyan-500/30 px-6 py-1 rounded-full inline-block bg-black/40">
           Kỷ Nguyên Đổi Mới Số
@@ -252,7 +260,7 @@ export default function GLBViewer({ onClose }) {
         ) : (
           <FpsControls 
             onUnlock={() => setViewMode('orbit')} 
-            eyeHeight={modelUrl === '/Current.glb' ? 0.3 : 0.8}
+            eyeHeight={modelUrl === '/14.glb' ? 0.3 : 0.8}
           />
         )}
       </Canvas>
@@ -262,6 +270,12 @@ export default function GLBViewer({ onClose }) {
           ? "✨ Chuột trái: Xoay | Lăn chuột: Thu phóng | Chuột phải: Di chuyển ✨"
           : "✨ Nhấn chuột vào màn hình: Đi bộ | W A S D: Di chuyển | Phím ESC: Chuột bình thường ✨"}
       </div>
+
+      {/* Tích hợp Audio Player nổi ở góc phải dưới cho Scene hiện tại */}
+      <MapAudioPlayer 
+        src={sceneAudioMap[modelUrl]} 
+        title={`Thuyết minh: ${modelUrl.replace('/', '').replace('.glb', '')}`} 
+      />
     </div>
   )
 }
